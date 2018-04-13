@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Copyright 2018  Brno University of Technology (author: Martin Karafiat)
+# Licensed under the Apache License, Version 2.0 (the "License")
+
+
 file=$1
 
 awk -F'[=,\\[]' '{print $2 " " $(NF-1) " " $0}'  $file | sort -k1,1g -k 2,2n  | awk '{print $NF}' |\

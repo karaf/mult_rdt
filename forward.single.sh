@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Copyright 2018  Brno University of Technology (author: Martin Karafiat)
+# Licensed under the Apache License, Version 2.0 (the "License")
+
 set -euo pipefail
 
 export LANG=en_US.UTF-8; export LC_ALL=$LANG

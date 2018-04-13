@@ -1,18 +1,7 @@
 #!/bin/bash
+# Copyright 2018  Brno University of Technology (author: Martin Karafiat)
+# Licensed under the Apache License, Version 2.0 (the "License")
 
-# Defaults
-                                                                                                                    
-for i in $*; do
-    case "$1" in
-        -?*)
-            echo Unknown option $1
-            exit
-            ;;
-        *)
-            break
-            ;;
-    esac
-done
 
 DATA=$1
 OU_SCP=$2
