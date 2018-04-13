@@ -1,1 +1,0 @@
-sox-14.4.1 LibriSpeech/test-clean/1089/134686/1089-134686-0019.wav -t wav -r8000 -b16 -c1 audio/1089-134686-0019.wav  remix -
