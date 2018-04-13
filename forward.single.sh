@@ -1,6 +1,7 @@
 #!/bin/bash
 
-MapToNewName=false
+set -euo pipefail
+
 export LANG=en_US.UTF-8; export LC_ALL=$LANG
 bRM="T"
 tmpdir=""
@@ -19,10 +20,6 @@ for i in $*; do
 	-rm)
 	    bRM=$2
 	    shift
-	    shift
-	    ;;
-	-bMapToNewName)
-	    MapToNewName=true
 	    shift
 	    ;;
 	-tempdir | -tmpdir)
@@ -61,7 +58,7 @@ if [ $# != 2 ]; then
   echo $0 WAV_file OUTDIR; exit 1;
 fi
 
-WFORM=$1
+DATADIR=$1
 OUTDIR=${2:?}
 
 
@@ -70,12 +67,14 @@ ROOTDIR=${0%/*}
 
 source $ROOTDIR/path.sh
 
+TOOLDIR=$ROOTDIR/tools
+
 #---------------------
 #   System settings
 # --------------------
-XFORMDIR=$MODELDIR/xforms
+XFORMDIR=$RDTMODELDIR/xforms
 
-CFG_PLP=$MODELDIR/configs.kaldi/plp.conf
+CFG_PLP=$RDTMODELDIR/configs.kaldi/plp.conf
 GLOBVAR_PLP=$XFORMDIR/plphlda/globalvar.kaldi
 PLPHLDAMACROS=$XFORMDIR/plphlda/hlda.kaldi
 
@@ -88,7 +87,8 @@ FirstPassDirRDT_GLOBVAR=$FirstPassDirRDT/globalvar
 
 
 
-echo "Program $0 started at $(date) on $HOSTNAME";
+echo "Program $0 started at $(date) on $HOSTNAME"
+echo "ROOTDIR $ROOTDIR"
 ###########################################################################
 
 # Make dirs
@@ -96,36 +96,24 @@ echo "Program $0 started at $(date) on $HOSTNAME";
 echo TMPDIR $TMPDIR
 
 SCPDIR=$TMPDIR/lib/flists
-VADDIR=$TMPDIR/VAD
 FEADIR=$TMPDIR/features
-mkdir -p $OUTDIR $SCPDIR $VADDIR $FEADIR $TMPDIR
+mkdir -p $OUTDIR $SCPDIR $FEADIR $TMPDIR
 # ----------------
 
 #root of the file name
+# If it is empty pickup first one only
 if [ -z $TAG ]; then
-    TAG=${WFORM##*/}; TAG=${TAG%.*}
+    TAG=$(awk '{print $1}' $DATADIR/wav.scp)
 fi
 
+# Convert waveform
+awk -v tag=$TAG -v tmpdir=$TMPDIR '
+$1==tag && NF==2{print "cp " $2 " " tmpdir "/" tag ".wav"} 
+$1==tag && NF>2{$1=""; print $0 " cat > " tmpdir "/" tag ".wav"} 
+' $DATADIR/wav.scp > $TMPDIR/prepare_wav.sh
+bash $TMPDIR/prepare_wav.sh
 
-if [ "$WFORM" == "-" ]; then
-    echo "$0: waveform is read from /dev/stdin"
-    [ -z $TAG ] && "ERROR: $0: -wavname is not defined"
-    [ -z $TAG ] && exit 1
-    sox -t wav /dev/stdin -t wav $TMPDIR/file.wav
-    WFORM=$TMPDIR/file.wav
-fi
-
-
-# Map into new name if needed
-TAG_ORIG=$TAG
-if $MapToNewName;then
-   echo  $WFORM | sed 's/\(.*\/\)\(.*\)/\1\2 \2/;s/\.sph$/ sph/;s/\.wav$/ wav/;s/\.raw$/ raw/;s/\.flac$/ flac/'| awk '{name=$2;tmp="echo " $2 " | openssl md5 | cut -f2 -d\" \""; tmp | getline cksum; $2=cksum" "name; print }'  |awk -v AD=$TMPDIR '{print "ln -s " $1" " AD"/"$2"."$4}' > $TMPDIR/audio_lnk.sh
-   chmod u+x $TMPDIR/audio_lnk.sh
-   $TMPDIR/audio_lnk.sh
-   WFORM=`head -1 $TMPDIR/audio_lnk.sh |awk '{print $4}'`
-   TAG=${WFORM##*/}; TAG=${TAG%.*}
-fi
-
+WFORM=$TMPDIR/$TAG.wav
 
 
 if [ ! -r $WFORM ]; then
@@ -134,44 +122,7 @@ fi
 
 if [ ! -d $OUTDIR ]; then mkdir -p $OUTDIR; fi
 
-if [ $WFORM == ${WFORM//\//} ]; then WFORM=$PWD/$WFORM; fi
 
-
-
-#normalize features
-percents=$(awk 'BEGIN{ l=length("'$TAG'"); for(i=0;i<l;i++) { str=str"%" }; print str;}')
-MASK="$percents*"
-MASK_NOSEG="*/$percents.???"
-
-
-
-echo "Running VAD with using $VADBIN"
-#sox $WFORM -t raw -r 8000 -s -w -c 1 $TMPDIR/$TAG.raw || { echo "ERROR"; exit 1; }
-###########################################################################
-################ Make Segmentation
-###########################################################################
-
-VADlabel=${VADlabel:-VAD}
-VADfrmext=${VADfrmext:-0}
-VADminspace=${VADminspace:-0}
-
-outfile=$VADDIR/$TAG.txt
-log=$VADDIR/$TAG.log
-mkdir -p $VADDIR/logs
-if [ ! -e $log.gz ]; then
-    bRunneed="T"
-    touch $outfile
-    echo $VADBIN $WFORM $outfile
-    if [ ! -e $log.gz ]; then if eval $VADBIN $WFORM $outfile > $log 2>&1; then gzip $outfile $log; fi; fi
-fi
-
-if [ ! -e $outfile.gz ]; then
-    echo "ERROR: VAD was not computed. Check $log"
-    exit 1
-fi
-
-gunzip -c $outfile | awk -v name=$TAG '{Start=$3; End=$4; print name " A " Start " " End-Start " <SPEECH>"}' > $VADDIR/$TAG.ctm
-echo -n "$outfile "; gunzip -c $outfile | grep -c '<SPEECH>' > $VADDIR/$TAG.speechcounts
 
 # ----------------------------------
 # Kaldi Data Dir 
@@ -179,33 +130,17 @@ echo -n "$outfile "; gunzip -c $outfile | grep -c '<SPEECH>' > $VADDIR/$TAG.spee
 datadir=$TMPDIR/data/$TAG/
 mkdir -p $datadir
 
-gzcat $VADDIR/$TAG.txt.gz > $datadir/segments
-echo "$TAG $WFORM" >  $datadir/wav.scp
+awk -v tag=$TAG '$2==tag' $DATADIR/segments > $datadir/segments
+echo "$TAG $WFORM"                          >  $datadir/wav.scp
 awk '{print $1 " " $2}' $datadir/segments > $datadir/utt2spk
-utt2spk_to_spk2utt.pl   $datadir/utt2spk > $datadir/spk2utt
+utt2spk_to_spk2utt.pl   $datadir/utt2spk  > $datadir/spk2utt
 
 # ----------------------------------
 # HTK SCP 
 # ----------------------------------
-audiodir=${WFORM%/*}
-cat $VADDIR/$TAG.ctm | awk '$NF=="<SPEECH>"' | \
-    $TOOLDIR/ctm2mlf.awk | $TOOLDIR/mlf.GenLabList.sh -    | \
-    awk -v audiodir=$audiodir -v frmext=$VADfrmext 'BEGIN{SilExtension=frmext}
-{gsub(".lab$","",$1); seg=$1;spkr_unmap=$1;
-     nS=split(seg,S,"[_-]"); StartFrame=S[nS-1];EndFrame=S[nS];
-     StartFrame-=SilExtension;EndFrame+=SilExtension; if(StartFrame<0) StartFrame=0;
-     gsub("-[[:digit:]]+-[[:digit:]]+$","",spkr_unmap); gsub("^_+","",spkr_unmap);
-     print seg ".wav=" audiodir "/" spkr_unmap ".wav[" StartFrame "," EndFrame "]";
-     #if ( spkr_unmap in MAP ){
-     #  print seg ".raw=" MAP[spkr_unmap] "[" StartFrame "," EndFrame "]";
-     #}else{
-     #   print spkr_unmap  " is not in mapping file" > "/dev/stderr"; exit
-     #}
-}' /dev/stdin > $SCPDIR/$TAG.wav.scp_uncorr
-
-$TOOLDIR/scp.CorrectLengh.audio.wav.sh $SCPDIR/$TAG.wav.scp_uncorr > $SCPDIR/$TAG.wav.scp 2> $SCPDIR/$TAG.wav.corr.LOG
+$TOOLDIR/scp.kaldisegments.ToHTK.sh $datadir - |\
+   $TOOLDIR/scp.CorrectLengh.audio.wav.sh - > $SCPDIR/$TAG.wav.scp 2> $SCPDIR/$TAG.wav.corr.LOG
 # ----------------
-
 
 
 if [ ! -s $SCPDIR/$TAG.wav.scp  ]; then
@@ -226,10 +161,6 @@ function MakeSCP()
 }
 
 
-if [ $bCP_SCP == "T" ]; then
-    mkdir -p $OUTDIR
-    cat  $SCPDIR/$TAG.wav.scp >  $OUTDIR/$TAG.wav.scp
-fi
 
 ###########################################################################
 ################ PLP
@@ -377,8 +308,8 @@ feakind=fbank24_kf0pd
 feadir=$FEADIR/$feakind
 [ ! -e $feadir ] && cp -r $datadir $feadir
 
-cfg_fbank=$MODELDIR/configs.kaldi/fbank24.conf
-cfg_f0=$MODELDIR/configs.kaldi/pitch.conf
+cfg_fbank=$RDTMODELDIR/configs.kaldi/fbank24.conf
+cfg_f0=$RDTMODELDIR/configs.kaldi/pitch.conf
 log=$feadir/CrbeF0.log
 if [ ! -e $log.gz ]; then
     fbank_feats="ark:compute-fbank-feats --verbose=2 --config=$cfg_fbank    scp:$datadir/wav.scp ark:- |"
@@ -450,7 +381,7 @@ if [ ! -e $log.gz ]; then
     feats="$feats apply-cmvn --norm-means=true --norm-vars=false scp:$feadir_in/cmvn.scp ark:- ark:- |"
     
     if (
-	    nnet-forward --verbose=2 $nnet_forward_opts --use-gpu=$use_gpu $nnet "$feats" \
+	    nnet-forward --verbose=2 --use-gpu=$use_gpu $nnet "$feats" \
 		ark,scp:$feadir/feats.ark,$feadir/feats.scp ) > $log 2>&1; then 
 	gzip $log
     fi
@@ -523,7 +454,6 @@ fi
 copy-feats-to-htk --output-dir=$feadir --output-ext=fea  scp:$feadir/feats.scp
 
 # Convert stats into HTK format
-# Get cvn norms for 52d stats (1/std)
 cmndir=$feadir/cmn
 cvndir=$feadir/cvn
 
@@ -561,6 +491,12 @@ fi
 ################ RDT forward 
 ###########################################################################
 if [ $STAGE_LAST -ge 32 ]; then
+
+# Create speaker mask 
+percents=$(awk 'BEGIN{ l=length("'$TAG'"); for(i=0;i<l;i++) { str=str"%" }; print str;}')
+MASK="$percents*"
+MASK_NOSEG="*/$percents.???"
+#-
 
 echo "Make RDTFea"
 feakind_in=$feakind
@@ -615,14 +551,5 @@ fi
 ################## Copy final fea into outdir
 ###########################################################################
 
-if $MapToNewName;then
-  dirname=$(dirname $OUTDIR/$TAG_ORIG.fea); mkdir -p $dirname   
-  cp $feadir/$TAG.fea $OUTDIR/$TAG_ORIG.fea
-  echo "FINISHED OK ... $OUTDIR/$TAG_ORIG.fea"
-else
-  cp $feadir/$TAG.fea $OUTDIR/
-  echo "FINISHED OK ... $OUTDIR/$TAG.fea"
-fi
-
-
-
+cp $feadir/$TAG.fea $OUTDIR/
+echo "FINISHED OK ... $OUTDIR/$TAG.fea"
