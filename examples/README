@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# Testing with toy example from librispeech
+
+../forward.single.sh -tmpdir tmpdir -rm F -tag 1089-134686-0019 data/test output
+#or just if you are not interested in intermediate outputs
+../forward.single.sh -tag 1089-134686-0019 data/test output
+
