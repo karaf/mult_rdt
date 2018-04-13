@@ -1,24 +1,13 @@
 #!/bin/bash
 
-MapToNewName="TRUE"
-MapToNewName="F"
+MapToNewName=false
 export LANG=en_US.UTF-8; export LC_ALL=$LANG
 bRM="T"
-bCP_SCP="F"
 tmpdir=""
-ANAL=""
 bNorm="T"
 STAGE=0
 STAGE_LAST=1000000   # 50 - 1stage.cmllr
 
-bPHX_CRBE=false
-
-#### Defaults #####
-NN_STARTFRMEXT=15
-NN_ENDFRMEXT=15
-
-NNname_2stage=2stageAdaptNN
-bPrintFirstPass=T
 
 for i in $*; do
     case "$1" in
@@ -33,7 +22,7 @@ for i in $*; do
 	    shift
 	    ;;
 	-bMapToNewName)
-	    MapToNewName="TRUE"
+	    MapToNewName=true
 	    shift
 	    ;;
 	-tempdir | -tmpdir)
@@ -42,21 +31,8 @@ for i in $*; do
             shift
             shift
             ;;
-	-anal) 
-	    ANAL=$2
-	    if [ ! -r $ANAL ]; then
-		echo cannot open $ANAL; exit 1;
-	    fi
-	    shift
-            shift
-            ;;
 	-wavname | -tag)
 	    TAG=$2
-	    shift
-	    shift
-	    ;;
-	-cp-scp)
-	    bCP_SCP=$2
 	    shift
 	    shift
 	    ;;
@@ -67,11 +43,6 @@ for i in $*; do
 	    ;;
 	-stage-final | -stage-last | -last-stage | -stage_last)
 	    STAGE_LAST=$2
-	    shift
-            shift
-            ;;
-	-fea-crbe)
-	    fea_crbe=$2
 	    shift
             shift
             ;;
@@ -94,47 +65,28 @@ WFORM=$1
 OUTDIR=${2:?}
 
 
-#change PWD in SGE
-echo PWD:$PWD
-[ -d "$SGE_O_WORKDIR" ] && cd $SGE_O_WORKDIR
-echo SGE_O_WORKDIR:$SGE_O_WORKDIR
-echo PWD:$PWD
-
 #---
 ROOTDIR=${0%/*}
-ROOTDIR=/mnt/matylda3/karafiat/BABEL/tasks/FeatureExtraction.BUTv3_Y4
 
-BINDIR=$ROOTDIR/bin
-#STKDIR=$ROOTDIR/bin/STK/bin
-#HTKDIR=$ROOTDIR/bin/HTK/bin ## Linked into bin
-TOOLDIR=$ROOTDIR/tools
-
-# -- Kaldi
-export KALDI_ROOT=/mnt/matylda3/karafiat/BABEL/GIT/Kaldi
-[ -f $KALDI_ROOT/tools/env.sh ] && . $KALDI_ROOT/tools/env.sh
-export PATH=$KALDI_ROOT/egs/wsj/s5/utils/:$KALDI_ROOT/tools/openfst/bin:$PWD:$PATH
-[ ! -f $KALDI_ROOT/tools/config/common_path.sh ] && echo >&2 "The standard file $KALDI_ROOT/tools/config/common_path.sh is not present -> Exit!" && exit 1
-. $KALDI_ROOT/tools/config/common_path.sh
-export LC_ALL=C
-
-KALDI_STEPS=$KALDI_ROOT/egs/wsj/s5/steps
+source $ROOTDIR/path.sh
 
 #---------------------
 #   System settings
 # --------------------
+XFORMDIR=$MODELDIR/xforms
 
-if [ -z $SYSTEM_CFG ]; then
-    SYSTEM_CFG=$ROOTDIR/systems/MultRDTv0.ENV  # Default
-    echo "Setting up defaut Language environment to $SYSTEM_CFG"
-fi
+CFG_PLP=$MODELDIR/configs.kaldi/plp.conf
+GLOBVAR_PLP=$XFORMDIR/plphlda/globalvar.kaldi
+PLPHLDAMACROS=$XFORMDIR/plphlda/hlda.kaldi
 
-if [ -e $SYSTEM_CFG ]; then
-    echo "Sourcing system definition cfg $SYSTEM_CFG"
-    source $SYSTEM_CFG
-else
-    echo "ERROR: $0: Environment configuration file $SYSTEM_CFG is missing!!"
-    exit 1
-fi
+XFORMDIR_NN=$XFORMDIR/nn.fbank24kf0
+
+gmmsize=125;indim=69;oudim=69
+FirstPassDirRDT=$XFORMDIR/MultRDT
+FirstPassDirRDT_MACROS=$FirstPassDirRDT/gmm$gmmsize,$FirstPassDirRDT/rd${indim}to${oudim}_gmm${gmmsize}_7ctx,$FirstPassDirRDT/macros_rd${indim}to${oudim}_gmm${gmmsize}_7ctx
+FirstPassDirRDT_GLOBVAR=$FirstPassDirRDT/globalvar
+
+
 
 echo "Program $0 started at $(date) on $HOSTNAME";
 ###########################################################################
@@ -143,9 +95,6 @@ echo "Program $0 started at $(date) on $HOSTNAME";
 [ -z $tmpdir ] && TMPDIR=$(mktemp -d) || TMPDIR=$tmpdir
 echo TMPDIR $TMPDIR
 
-#SCPDIR=$OUTDIR/lib/flists
-#VADDIR=$OUTDIR/VAD
-#FEADIR=$OUTDIR/features
 SCPDIR=$TMPDIR/lib/flists
 VADDIR=$TMPDIR/VAD
 FEADIR=$TMPDIR/features
@@ -169,7 +118,7 @@ fi
 
 # Map into new name if needed
 TAG_ORIG=$TAG
-if [ "$MapToNewName" == "TRUE" ];then
+if $MapToNewName;then
    echo  $WFORM | sed 's/\(.*\/\)\(.*\)/\1\2 \2/;s/\.sph$/ sph/;s/\.wav$/ wav/;s/\.raw$/ raw/;s/\.flac$/ flac/'| awk '{name=$2;tmp="echo " $2 " | openssl md5 | cut -f2 -d\" \""; tmp | getline cksum; $2=cksum" "name; print }'  |awk -v AD=$TMPDIR '{print "ln -s " $1" " AD"/"$2"."$4}' > $TMPDIR/audio_lnk.sh
    chmod u+x $TMPDIR/audio_lnk.sh
    $TMPDIR/audio_lnk.sh
@@ -428,13 +377,8 @@ feakind=fbank24_kf0pd
 feadir=$FEADIR/$feakind
 [ ! -e $feadir ] && cp -r $datadir $feadir
 
-if [ ! -z $fea_crbe ] && [ -s $fea_crbe ]; then
-    cp -r $fea_crbe $feadir
-    touch $feadir/CrbeF0.log.gz
-fi
-
-cfg_fbank=$SYSTEMDIR/configs.kaldi/fbank24.conf
-cfg_f0=$SYSTEMDIR/configs.kaldi/pitch.conf
+cfg_fbank=$MODELDIR/configs.kaldi/fbank24.conf
+cfg_f0=$MODELDIR/configs.kaldi/pitch.conf
 log=$feadir/CrbeF0.log
 if [ ! -e $log.gz ]; then
     fbank_feats="ark:compute-fbank-feats --verbose=2 --config=$cfg_fbank    scp:$datadir/wav.scp ark:- |"
@@ -511,11 +455,11 @@ if [ ! -e $log.gz ]; then
 	gzip $log
     fi
 else
-    echo "SFeaCat: NN: already done.. Skipped"
+    echo "nnet-forward: NN: already done.. Skipped"
 fi
 
 if [ -e $log ]; then
-    echo "ERROR: SFeaCat: Check $log"
+    echo "ERROR: nnet-forward: Check $log"
     exit 1
 fi
 
@@ -649,28 +593,19 @@ if [ ! -e $log.gz ]; then
     ) > $feadir/sfeacat.config
 
 #    if /usr/bin/time -v $BINDIR/SFeaCat  \
-    if $BINDIR/SFeaCat  \
-	--HMMDEFFILTER="$TOOLDIR/readfile.sh $ " \
+    if $STKBIN/SFeaCat  \
 	-A -D -V -T 1 -l $feadir -y fea \
 	-C $feadir/sfeacat.config       \
 	$feadir_in/$TAG.fea > $log 2>&1; then 
 	gzip $log
     fi
 else
-    echo "SFeaCat: SATRDT: already done.. Skipped"
+    echo "SFeaCat: already done.. Skipped"
 fi
 
 if [ -e $log ]; then
     echo "ERROR: SFeaCat: Check $log"
     exit 1
-fi
-
-if [ "$bNorm" == "T" ]; then
-    $TOOLDIR/cmncvn.sh -mask $MASK -cmn-fea USER -cvn-fea USER_Z $feadir $SCPDIR/$TAG.$feakind.scp
-else
-    mkdir -p $feadir/{cmn,cvn}
-    $TOOLDIR/cmncvn.PrintEmptyCMN.sh -dim 69 -feakind USER   > $feadir/cmn/$TAG
-    $TOOLDIR/cmncvn.PrintEmptyCVN.sh -dim 69 -feakind USER_Z > $feadir/cvn/$TAG
 fi
 
 
@@ -680,7 +615,7 @@ fi
 ################## Copy final fea into outdir
 ###########################################################################
 
-if [ "$MapToNewName" == "TRUE" ];then
+if $MapToNewName;then
   dirname=$(dirname $OUTDIR/$TAG_ORIG.fea); mkdir -p $dirname   
   cp $feadir/$TAG.fea $OUTDIR/$TAG_ORIG.fea
   echo "FINISHED OK ... $OUTDIR/$TAG_ORIG.fea"
