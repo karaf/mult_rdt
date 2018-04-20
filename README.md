@@ -3,12 +3,27 @@ The features are well suitable mainly for Gaussian Mixture Models (GMM) in Autom
 
 The whole process could be split into 3 steps. Standard PLP-HLDA features are concatenated with Stacked Bottle-Neck Features trained in multilingual fashion on Babel data coming from 17 different languages.
 This features are going into discriminatively trained RDT transforms on 17 Babel languages which generates final outputs.
-   
-The models can be downloaded from
-http://www.fit.vutbr.cz/~karafiat/software/MultRDTv1.tar.gz
 
-and the RDT forwarding script is available in 
-git@github.com:karaf/mult_rdt.git
+It requies:
+ -  STK with RDT extension, which can be downloaded by:
+    git clone -b rd_xforms https://github.com/stk-developers/stk.git
+      and follow manual  
+ -  Kaldi: git clone https://github.com/kaldi-asr/kaldi.git
+ -  RDT and NN models: http://www.fit.vutbr.cz/~karafiat/software/MultRDTv1.tar.gz
+
+
+After instalation modify $KALDI_ROOT, $STKBIN, $RDTMODELS
+in path.sh
+
+and test the script by 
+cd examples
+../forward.single.sh -tmpdir tmpdir -rm F -tag 1089-134686-0019 data/test output
+
+
+Current version of the script "forward.single.sh" can process only single wavfile "-tag wavname" and save the output file into "outdir" in HTK format.
+In future is planing more clever version which process whole dir.
+In case of any problem let me know.
+
 
 
 Licence:
